@@ -121,6 +121,8 @@ void setColor(uint8_t red, uint8_t green, uint8_t blue) {
 
 /**
  * Sends a set brightness message
+ *
+ * @param percentage from 0 to 100
  */
 void setBrightness(uint8_t percentage) {
     uint8_t message[7];
@@ -132,6 +134,8 @@ void setBrightness(uint8_t percentage) {
 
 /**
  * Syncs bulb to this device
+ *
+ * This is the same as long pressing a group button on the remote.
  *
  * @param group from 1 - 4
  */
