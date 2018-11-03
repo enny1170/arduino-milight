@@ -1,5 +1,5 @@
 #define DEBUG
-
+#define NRF24DUINO
 #include <Arduino.h>
 #include <RF24.h>
 
@@ -10,9 +10,17 @@
 #include "PL1167_nRF24.h"
 #include "MiLightRadio.h"
 
-#define CE_PIN 8
-#define CSN_PIN 10
-#define SYNC_BUTTON_PIN 2
+#ifndef NRF24DUINO
+    #define CE_PIN 8
+    #define CSN_PIN 10
+#else
+    #define CE_PIN 7
+    #define CSN_PIN 10
+    #define LED_PIN 9
+#endif
+#define SYNC_BUTTON_PIN 4
+#define COLOR_BUTTON_PIN 3
+#define ON_OFF_BUTTON_PIN 2
 
 // define message template (id, id, id, color, brightness, button, seq)
 static uint8_t message_t[] = {0xB0, 0x2C, 0x8C, 0x00, 0xB9, 0, 0xDD};
@@ -25,6 +33,29 @@ MiLightRadio mlr(prf);
 // create global sequence number
 uint8_t seq_num = 0x00;
 
+uint8_t current_red=255;
+uint8_t current_green=0;
+uint8_t current_blue=0;
+uint8_t counter=0;
+bool state=false;
+bool stateChanged=false;
+unsigned long onMillis=0;
+
+void pirInterrupt()
+{
+    Serial.println("Interrupt received");
+    if(state)
+    {
+        //state=false;
+    }
+    else
+    {
+        state=true;
+        stateChanged=true;
+    }
+    onMillis=millis();
+    Serial.println("Reset Timer");
+}
 
 
 void setup() {
@@ -32,13 +63,17 @@ void setup() {
 #ifdef DEBUG
     printf_begin();
 #endif
-    pinMode(SYNC_BUTTON_PIN, INPUT);
+#ifdef LED_PIN
+    pinMode(LED_PIN,OUTPUT);
+#endif
+    pinMode(SYNC_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(COLOR_BUTTON_PIN,INPUT_PULLUP);
+    pinMode(ON_OFF_BUTTON_PIN,INPUT_PULLUP);
     delay(1000);
     Serial.println("# MiLight starting");
     // setup mlr (wireless settings)
     mlr.begin();
-
-
+    attachInterrupt(INT0,pirInterrupt,RISING);
 }
 
 /**
@@ -48,9 +83,12 @@ void setup() {
  * @param data uint8_t array of data to send
  * @param resend normally a packed is transmitted 3 times, for more important packages this number can be increased
  */
-void send_raw(uint8_t data[7], uint8_t resend = 3) {
+void send_raw(uint8_t data[7], uint8_t resend = 5) {
     data[6] = seq_num;
     seq_num++;
+    #ifdef LED_PIN
+        digitalWrite(LED_PIN,HIGH);
+    #endif
     mlr.write(data, 7);
     delay(1);
     for (int j = 0; j < resend; ++j) {
@@ -58,6 +96,9 @@ void send_raw(uint8_t data[7], uint8_t resend = 3) {
         delay(5);
     }
     delay(10);
+    #ifdef LED_PIN
+        digitalWrite(LED_PIN,LOW);
+    #endif
 
 #ifdef DEBUG
     Serial.print("Sending: ");
@@ -132,6 +173,25 @@ void setBrightness(uint8_t percentage) {
     send_raw(message);
 }
 
+void switchOn()
+{
+    uint8_t message[7];
+    memcpy(message, message_t, 7);
+    //message[5] = 0x0E;
+    //message[4] = percentage2mibrightness(percentage);
+    message[5]=0x01;
+    send_raw(message);
+}
+
+void switchOff()
+{
+    uint8_t message[7];
+    memcpy(message, message_t, 7);
+    //message[5] = 0x0E;
+    //message[4] = percentage2mibrightness(percentage);
+    message[5]=0x02;
+    send_raw(message);
+}
 /**
  * Syncs bulb to this device
  *
@@ -155,11 +215,80 @@ void sendSync(uint8_t group) {
 }
 
 void loop() {
-    if (digitalRead(SYNC_BUTTON_PIN)) {
+    if (!digitalRead(SYNC_BUTTON_PIN)) {
 
         sendSync(1);
     }
+    // switch color by Button
+    if(!digitalRead(COLOR_BUTTON_PIN))
+    {
+        Serial.println("Button pressed");
+        counter=counter+1;
+        if(counter==0)
+        {
+            Serial.println("Green");
+            current_red=0;
+            current_green=255;
+            current_blue=0;
+            switchOn();
+        }
+        if(counter==1)
+        {
+            Serial.println("Blue");
+            current_red=0;
+            current_green=0;
+            current_blue=255;
+        }
+        if(counter==2)
+        {
+            Serial.println("Red");
+            current_red=255;
+            current_green=0;
+            current_blue=0;
+        }
+        if(counter>2)
+        {
+            Serial.println("SwitchOff");
+            counter=0;
+            current_blue=0;
+            current_green=0;
+            current_red=0;
+            switchOff();
+        }
+        setColor(current_red,current_green,current_blue);
+        setBrightness(100);
+    }
 
+    if(stateChanged)
+    {
+        Serial.println("Switch Button pressed");
+        // if(state)
+        // {
+        //     Serial.println("Switch Off");
+        //     switchOff();
+        //     stateChanged=false;
+        // }
+        // else
+        // {
+        //     Serial.println("Switch On");
+        //     switchOn();
+        //     stateChanged=false;
+        // }
+        Serial.println("Switch on");
+        switchOn();
+        stateChanged=false;
+    }
+    if(millis()-onMillis>18000 && onMillis>0 )
+    {
+        Serial.print("OnMillis:");
+        Serial.println(onMillis);
+        Serial.print("Millis:");
+        Serial.println(millis());
+        Serial.println("Switch off");
+        switchOff();
+        onMillis=0;
+        state=false;
+    }
 //    setColor(255, 0, 0);
 //    setBrightness(100);
     delay(1000);
